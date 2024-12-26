@@ -994,5 +994,22 @@ var1 = store(var0, 0, 1)""",
         )
 
 
+def optimize(bb: Block) -> Block:
+    opt_bb = constfold(bb)
+    opt_bb = optimize_alloc_removal(opt_bb)
+    opt_bb = optimize_load_store(opt_bb)
+    opt_bb = delete_dead_code(opt_bb)
+    return opt_bb
+
+
+class OptimizeTests(unittest.TestCase):
+    def test_delete_known_store(self):
+        bb = Block()
+        var0 = bb.alloc()
+        var1 = bb.store(var0, 0, 1)
+        opt_bb = optimize(bb)
+        self.assertEqual(bb_to_str(opt_bb), "")
+
+
 if __name__ == "__main__":
     unittest.main()
