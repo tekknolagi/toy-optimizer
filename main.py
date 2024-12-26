@@ -33,9 +33,10 @@ class Operation(Value):
         self.name = name
         self.args = args
         self.forwarded = None
+        self.info = None
 
     def __repr__(self):
-        return f"Operation({self.name}, {self.args}, {self.forwarded})"
+        return f"Operation({self.name}, {self.args}, {self.forwarded}, {self.info})"
 
     def find(self) -> Value:
         # returns the "representative" value of
@@ -162,6 +163,10 @@ class Block(list):
     getarg = opbuilder("getarg")
     dummy = opbuilder("dummy")
     lshift = opbuilder("lshift")
+    alloc = opbuilder("alloc")
+    load = opbuilder("load")
+    store = opbuilder("store")
+    print = opbuilder("print")
 
 
 class BlockTests(unittest.TestCase):
@@ -324,6 +329,96 @@ optvar1 = add(9, optvar0)""",
             """\
 optvar0 = getarg(0)
 optvar1 = add(19, optvar0)""",
+        )
+
+
+class VirtualObject:
+    def __init__(self):
+        self.contents: dict[int, Value] = {}
+
+    def store(self, idx, value):
+        self.contents[idx] = value
+
+    def load(self, idx):
+        return self.contents[idx]
+
+
+def get_num(op, index=1):
+    assert isinstance(op.arg(index), Constant)
+    return op.arg(index).value
+
+
+def optimize_alloc_removal(bb):
+    opt_bb = Block()
+    for op in bb:
+        if op.name == "alloc":
+            op.info = VirtualObject()
+            continue
+        if op.name == "load":
+            info = op.arg(0).info
+            field = get_num(op)
+            op.make_equal_to(info.load(field))
+            continue
+        if op.name == "store":
+            info = op.arg(0).info
+            field = get_num(op)
+            info.store(field, op.arg(2))
+            continue
+        opt_bb.append(op)
+    return opt_bb
+
+
+class AllocationRemovalTests(unittest.TestCase):
+    def test_remove_unused_allocation(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        obj = bb.alloc()
+        sto = bb.store(obj, 0, var0)
+        var1 = bb.load(obj, 0)
+        bb.print(var1)
+        opt_bb = optimize_alloc_removal(bb)
+        # the virtual object looks like this:
+        #  obj
+        # ┌──────────┐
+        # │ 0: var0  │
+        # └──────────┘
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = print(optvar0)""",
+        )
+
+    def test_remove_two_allocations(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        obj0 = bb.alloc()
+        sto1 = bb.store(obj0, 0, var0)
+        obj1 = bb.alloc()
+        sto2 = bb.store(obj1, 0, obj0)
+        var1 = bb.load(obj1, 0)
+        var2 = bb.load(var1, 0)
+        bb.print(var2)
+        # the virtual objects look like this:
+        #  obj0
+        # ┌──────┐
+        # │ 0: ╷ │
+        # └────┼─┘
+        #      │
+        #      ▼
+        #     obj1
+        #   ┌─────────┐
+        #   │ 0: var0 │
+        #   └─────────┘
+        # therefore
+        # var1 is the same as obj0
+        # var2 is the same as var0
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = print(optvar0)""",
         )
 
 
