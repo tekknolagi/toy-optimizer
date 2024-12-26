@@ -3,7 +3,11 @@ from typing import Optional, Any
 
 
 class Value:
-    pass
+    def find(self):
+        raise NotImplementedError("abstract")
+
+    def _set_forwarded(self, value):
+        raise NotImplementedError("abstract")
 
 
 class Constant(Value):
@@ -13,17 +17,56 @@ class Constant(Value):
     def __repr__(self):
         return f"Constant({self.value})"
 
+    def find(self):
+        return self
+
+    def _set_forwarded(self, value: Value):
+        # if we found out that an Operation is
+        # equal to a constant, it's a compiler bug
+        # to find out that it's equal to another
+        # constant
+        assert isinstance(value, Constant) and value.value == self.value
+
 
 class Operation(Value):
     def __init__(self, name: str, args: list[Value]):
         self.name = name
         self.args = args
+        self.forwarded = None
 
     def __repr__(self):
-        return f"Operation({self.name}, {self.args})"
+        return f"Operation({self.name}, {self.args}, {self.forwarded})"
 
-    def arg(self, index: int):
-        return self.args[index]
+    def find(self) -> Value:
+        # returns the "representative" value of
+        # self, in the union-find sense
+        op = self
+        while isinstance(op, Operation):
+            # could do path compression here too
+            # but not essential
+            next = op.forwarded
+            if next is None:
+                return op
+            op = next
+        return op
+
+    def arg(self, index):
+        # change to above: return the
+        # representative of argument 'index'
+        return self.args[index].find()
+
+    def make_equal_to(self, value: Value):
+        # this is "union" in the union-find sense,
+        # but the direction is important! The
+        # representative of the union of Operations
+        # must be either a Constant or an operation
+        # that we know for sure is not optimized
+        # away.
+
+        self.find()._set_forwarded(value)
+
+    def _set_forwarded(self, value: Value):
+        self.forwarded = value
 
 
 class OperationTests(unittest.TestCase):
@@ -49,6 +92,51 @@ class OperationTests(unittest.TestCase):
 
         sequence = [a, b, var1, var2, var3, var4]
         # nothing to test really, it shouldn't crash
+
+    def test_union_find(self):
+        # construct three operation, and unify them
+        # step by step
+        bb = Block()
+        a1 = bb.dummy(1)
+        a2 = bb.dummy(2)
+        a3 = bb.dummy(3)
+
+        # at the beginning, every op is its own
+        # representative, that means every
+        # operation is in a singleton set
+        # {a1} {a2} {a3}
+        self.assertIs(a1.find(), a1)
+        self.assertIs(a2.find(), a2)
+        self.assertIs(a3.find(), a3)
+
+        # now we unify a2 and a1, then the sets are
+        # {a1, a2} {a3}
+        a2.make_equal_to(a1)
+        # they both return a1 as the representative
+        self.assertIs(a1.find(), a1)
+        self.assertIs(a2.find(), a1)
+        # a3 is still different
+        self.assertIs(a3.find(), a3)
+
+        # now they are all in the same set {a1, a2, a3}
+        a3.make_equal_to(a2)
+        self.assertIs(a1.find(), a1)
+        self.assertIs(a2.find(), a1)
+        self.assertIs(a3.find(), a1)
+
+        # now they are still all the same, and we
+        # also learned that they are the same as the
+        # constant 6
+        # the single remaining set then is
+        # {6, a1, a2, a3}
+        c = Constant(6)
+        a2.make_equal_to(c)
+        self.assertIs(a1.find(), c)
+        self.assertIs(a2.find(), c)
+        self.assertIs(a3.find(), c)
+
+        # union with the same constant again is fine
+        a2.make_equal_to(c)
 
 
 class Block(list):
@@ -124,10 +212,7 @@ def bb_to_str(bb: Block, varprefix: str = "var"):
         # printing:
         var = f"{varprefix}{index}"
         varnames[op] = var
-        arguments = ", ".join(
-            arg_to_str(op.arg(i))
-                for i in range(len(op.args))
-        )
+        arguments = ", ".join(arg_to_str(op.arg(i)) for i in range(len(op.args)))
         strop = f"{var} = {op.name}({arguments})"
         res.append(strop)
     return "\n".join(res)
@@ -140,17 +225,23 @@ class BlockStrTests(unittest.TestCase):
         var1 = bb.add(5, 4)
         var2 = bb.add(var1, var0)
 
-        self.assertEqual(bb_to_str(bb), """\
+        self.assertEqual(
+            bb_to_str(bb),
+            """\
 var0 = getarg(0)
 var1 = add(5, 4)
-var2 = add(var1, var0)""")
+var2 = add(var1, var0)""",
+        )
 
         # with a different prefix for the invented
         # variable names:
-        self.assertEqual(bb_to_str(bb, "x"), """\
+        self.assertEqual(
+            bb_to_str(bb, "x"),
+            """\
 x0 = getarg(0)
 x1 = add(5, 4)
-x2 = add(x1, x0)""")
+x2 = add(x1, x0)""",
+        )
 
         # and our running example:
         bb = Block()
@@ -161,19 +252,21 @@ x2 = add(x1, x0)""")
         var3 = bb.add(b, 17)
         var4 = bb.add(var2, var3)
 
-        self.assertEqual(bb_to_str(bb, "v"), """\
+        self.assertEqual(
+            bb_to_str(bb, "v"),
+            """\
 v0 = getarg(0)
 v1 = getarg(1)
 v2 = add(v1, 17)
 v3 = mul(v0, v2)
 v4 = add(v1, 17)
-v5 = add(v3, v4)""")
+v5 = add(v3, v4)""",
+        )
         # Note the re-numbering of the variables! We
         # don't attach names to Operations at all, so
         # the printing will just number them in
         # sequence, can sometimes be a source of
         # confusion.
-
 
 
 if __name__ == "__main__":
