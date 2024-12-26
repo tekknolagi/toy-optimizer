@@ -686,5 +686,247 @@ optvar5 = store(optvar0, 1, optvar2)""",
         )
 
 
+def eq_value(left: Value, right: Value) -> bool:
+    if isinstance(left, Constant) and isinstance(right, Constant):
+        return left.value == right.value
+    return left is right
+
+
+def optimize_load_store(bb: Block):
+    opt_bb = Block()
+    # Stores things we know about the heap at... compile-time. This information
+    # can come from either stores or loads.
+    compile_time_heap: Dict[Tuple[Value, Offset], Value] = {}
+    for op in bb:
+        if op.name == "store":
+            offset = get_num(op, 1)
+            store_info = (op.arg(0), offset)
+            current_value = compile_time_heap.get(store_info)
+            new_value = op.arg(2)
+            if current_value is not None and eq_value(current_value, new_value):
+                # No sense storing again if the value inside the field is
+                # identical to what we are trying to store. We might know this
+                # from a previous store or load.
+                # Since we are not writing to the heap in this case, the heap
+                # is unchanged, so we don't need to invalidate any prior heap
+                # knowledge.
+                continue
+            # Objects can alias, so we have to remove potentially conflicting
+            # writes and reads
+            heap_copy = {}
+            for key, value in compile_time_heap.items():
+                if key[1] != offset:
+                    heap_copy[key] = value
+            compile_time_heap = heap_copy
+            compile_time_heap[store_info] = new_value
+        elif op.name == "load":
+            load_info = (op.arg(0), get_num(op, 1))
+            if load_info in compile_time_heap:
+                op.make_equal_to(compile_time_heap[load_info])
+                continue
+            compile_time_heap[load_info] = op
+        opt_bb.append(op)
+    return opt_bb
+
+
+class LoadStoreTests(unittest.TestCase):
+    def test_load_after_store_removed(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        bb.store(var0, 0, 5)
+        var1 = bb.load(var0, 0)
+        var2 = bb.load(var0, 1)
+        bb.print(var1)
+        bb.print(var2)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = store(var0, 0, 5)
+var2 = load(var0, 1)
+var3 = print(5)
+var4 = print(var2)""",
+        )
+
+    def test_loads_between_stores_removed(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        bb.store(var0, 0, 5)
+        var1 = bb.load(var0, 0)
+        bb.store(var0, 0, 7)
+        var2 = bb.load(var0, 0)
+        bb.print(var1)
+        bb.print(var2)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = store(var0, 0, 5)
+var2 = store(var0, 0, 7)
+var3 = print(5)
+var4 = print(7)""",
+        )
+
+    def test_two_stores_same_offset(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.getarg(1)
+        bb.store(var0, 0, 5)
+        bb.store(var1, 0, 7)
+        load1 = bb.load(var0, 0)
+        load2 = bb.load(var1, 0)
+        bb.print(load1)
+        bb.print(load2)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = getarg(1)
+var2 = store(var0, 0, 5)
+var3 = store(var1, 0, 7)
+var4 = load(var0, 0)
+var5 = print(var4)
+var6 = print(7)""",
+        )
+
+    def test_two_stores_different_offset(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.getarg(1)
+        bb.store(var0, 0, 5)
+        bb.store(var1, 1, 7)
+        load1 = bb.load(var0, 0)
+        load2 = bb.load(var1, 1)
+        bb.print(load1)
+        bb.print(load2)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = getarg(1)
+var2 = store(var0, 0, 5)
+var3 = store(var1, 1, 7)
+var4 = print(5)
+var5 = print(7)""",
+        )
+
+    def test_two_loads(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.load(var0, 0)
+        var2 = bb.load(var0, 0)
+        bb.print(var1)
+        bb.print(var2)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = load(var0, 0)
+var2 = print(var1)
+var3 = print(var1)""",
+        )
+
+    def test_load_store_load(self):
+        bb = Block()
+        arg1 = bb.getarg(0)
+        arg2 = bb.getarg(1)
+        var1 = bb.load(arg1, 0)
+        bb.store(arg2, 0, 123)
+        var2 = bb.load(arg1, 0)
+        bb.print(var1)
+        bb.print(var2)
+        opt_bb = optimize_load_store(bb)
+        # Cannot optimize :(
+        self.assertEqual(bb_to_str(opt_bb), bb_to_str(bb))
+
+    def test_load_then_store(self):
+        bb = Block()
+        arg1 = bb.getarg(0)
+        var1 = bb.load(arg1, 0)
+        bb.store(arg1, 0, var1)
+        bb.print(var1)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = load(var0, 0)
+var2 = print(var1)""",
+        )
+
+    # TODO(max): Test above with aliasing objects
+
+    def test_load_then_store_then_load(self):
+        bb = Block()
+        arg1 = bb.getarg(0)
+        var1 = bb.load(arg1, 0)
+        bb.store(arg1, 0, var1)
+        var2 = bb.load(arg1, 0)
+        bb.print(var1)
+        bb.print(var2)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = load(var0, 0)
+var2 = print(var1)
+var3 = print(var1)""",
+        )
+
+    def test_store_after_store(self):
+        bb = Block()
+        arg1 = bb.getarg(0)
+        bb.store(arg1, 0, 5)
+        bb.store(arg1, 0, 5)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = store(var0, 0, 5)""",
+        )
+
+    def test_load_store_aliasing(self):
+        bb = Block()
+        arg0 = bb.getarg(0)
+        arg1 = bb.getarg(1)
+        var0 = bb.load(arg0, 0)
+        var1 = bb.load(arg1, 0)
+        var2 = bb.store(arg0, 0, var0)
+        var3 = bb.load(arg0, 0)
+        var4 = bb.load(arg1, 0)
+        bb.print(var3)
+        bb.print(var4)
+        # In the non-aliasing case (arg0 is not arg1), then we can remove:
+        # * var2, because we are storing the result of a read;
+        # * var3, because we know what we just stored in var2;
+        # * var4, because we know the store in var2 did not affect arg1 and we
+        #   already have a load
+        # In the aliasing case (arg0 is arg1), then we can remove:
+        # * var1, because we have already loaded off the same object in var0;
+        # * var2, because we are storing the result of a read;
+        # * var3, because we know what we just stored in var2;
+        # * var4, for the same reason as above
+        # Because we don't know if they alias or not, we can only remove the
+        # intersection of the above two cases: var2, var3, var4.
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = getarg(1)
+var2 = load(var0, 0)
+var3 = load(var1, 0)
+var4 = print(var2)
+var5 = print(var3)""",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
