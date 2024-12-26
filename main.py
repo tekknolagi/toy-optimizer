@@ -972,7 +972,6 @@ var0 = getarg(0)
 var1 = print(var0)""",
         )
 
-    # TODO(max): Maybe on a combination of load/store opt and DCE
     @unittest.expectedFailure
     def test_delete_known_store(self):
         bb = Block()
@@ -1014,7 +1013,7 @@ class OptimizeTests(unittest.TestCase):
         bb = Block()
         arg0 = bb.getarg(0)
         var1 = bb.store(arg0, 0, 1)
-        opt_bb = delete_dead_code(bb)
+        opt_bb = optimize(bb)
         self.assertEqual(
             bb_to_str(opt_bb),
             """\
