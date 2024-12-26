@@ -352,10 +352,15 @@ def materialize(opt_bb, value: Operation) -> None:
     assert not isinstance(value, Constant)
     assert isinstance(value, Operation)
     info = value.info
+    if info is None:
+        # already materialized
+        return
     assert isinstance(info, VirtualObject)
     assert value.name == "alloc"
     # put the alloc operation back into the trace
     opt_bb.append(value)
+    # but only once
+    value.info = None
 
 
 def optimize_alloc_removal(bb):
@@ -458,6 +463,25 @@ optvar1 = print(optvar0)""",
 optvar0 = getarg(0)
 optvar1 = alloc()
 optvar2 = store(optvar0, 0, optvar1)""",
+        )
+
+    def test_dont_materialize_twice(self):
+        # obj is again an empty virtual object,
+        # and we store it into var0 *twice*.
+        # this should only materialize it once
+        bb = Block()
+        var0 = bb.getarg(0)
+        obj = bb.alloc()
+        sto0 = bb.store(var0, 0, obj)
+        sto1 = bb.store(var0, 0, obj)
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = alloc()
+optvar2 = store(optvar0, 0, optvar1)
+optvar3 = store(optvar0, 0, optvar1)""",
         )
 
 
