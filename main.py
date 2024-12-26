@@ -363,7 +363,7 @@ def materialize(opt_bb, value: Operation) -> None:
     # only materialize once
     value.info = None
     # put the content back
-    for idx, val in info.contents.items():
+    for idx, val in sorted(info.contents.items()):
         # materialize recursively
         materialize(opt_bb, val)
         # re-create store operation
