@@ -349,7 +349,8 @@ def get_num(op, index=1):
 
 
 def materialize(opt_bb, value: Operation) -> None:
-    assert not isinstance(value, Constant)
+    if isinstance(value, Constant):
+        return
     assert isinstance(value, Operation)
     info = value.info
     if info is None:
@@ -482,6 +483,43 @@ optvar0 = getarg(0)
 optvar1 = alloc()
 optvar2 = store(optvar0, 0, optvar1)
 optvar3 = store(optvar0, 0, optvar1)""",
+        )
+
+    def test_materialize_non_virtuals(self):
+        # in this example we store a non-virtual var1
+        # into another non-virtual var0
+        # this should just lead to no optimization at
+        # all
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.getarg(1)
+        sto = bb.store(var0, 0, var1)
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = getarg(1)
+optvar2 = store(optvar0, 0, optvar1)""",
+        )
+
+    def test_materialization_constants(self):
+        # in this example we store the constant 17
+        # into the non-virtual var0
+        # again, this will not be optimized
+        bb = Block()
+        var0 = bb.getarg(0)
+        sto = bb.store(var0, 0, 17)
+        opt_bb = optimize_alloc_removal(bb)
+        # the previous line fails so far, triggering
+        # the assert:
+        # assert not isinstance(value, Constant)
+        # in materialize
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = store(optvar0, 0, 17)""",
         )
 
 
