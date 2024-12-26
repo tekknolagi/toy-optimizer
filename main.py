@@ -928,5 +928,66 @@ var5 = print(var3)""",
         )
 
 
+def has_side_effects(op: Operation) -> bool:
+    return op.name in {"print", "store"}
+
+
+def delete_dead_code(bb: Block) -> Block:
+    # Mark
+    mark = {}
+    worklist = []
+    for op in bb:
+        if has_side_effects(op):  # is critical
+            mark[op] = True
+            worklist.append(op)
+    while worklist:
+        op = worklist.pop(0)
+        for arg in op.args:
+            if isinstance(arg, Constant):
+                continue
+            arg = arg.find()
+            if arg not in mark:
+                mark[arg] = True
+                worklist.append(arg)
+    # Sweep
+    return Block([op for op in bb if op in mark])
+
+
+class DeadCodeEliminationTests(unittest.TestCase):
+    def test_delete_unused_op(self):
+        bb = Block()
+        arg0 = bb.getarg(0)
+        opt_bb = delete_dead_code(bb)
+        self.assertEqual(bb_to_str(opt_bb), "")
+
+    def test_keep_escaped_op(self):
+        bb = Block()
+        arg0 = bb.getarg(0)
+        bb.print(arg0)
+        opt_bb = delete_dead_code(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = print(var0)""",
+        )
+
+    def test_delete_known_store(self):
+        # TODO(max): Maybe on a combination of load/store opt and DCE
+        pass
+
+    def test_keep_unknown_store(self):
+        bb = Block()
+        arg0 = bb.getarg(0)
+        var1 = bb.store(arg0, 0, 1)
+        opt_bb = delete_dead_code(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = store(var0, 0, 1)""",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
