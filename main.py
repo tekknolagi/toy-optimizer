@@ -340,6 +340,8 @@ class VirtualObject:
         self.contents[idx] = value
 
     def load(self, idx):
+        if idx not in self.contents:
+            raise Exception(f"Load of uninitialized field {idx}")
         return self.contents[idx]
 
 
