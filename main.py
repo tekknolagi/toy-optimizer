@@ -360,14 +360,14 @@ def materialize(opt_bb, value: Operation) -> None:
     assert value.name == "alloc"
     # put the alloc operation back into the trace
     opt_bb.append(value)
+    # only materialize once
+    value.info = None
     # put the content back
     for idx, val in info.contents.items():
         # materialize recursively
         materialize(opt_bb, val)
         # re-create store operation
         opt_bb.store(value, idx, val)
-    # but only once
-    value.info = None
 
 
 def optimize_alloc_removal(bb):
@@ -587,6 +587,37 @@ optvar2 = alloc()
 optvar3 = store(optvar2, 0, 1337)
 optvar4 = store(optvar1, 0, optvar2)
 optvar5 = store(optvar0, 0, optvar1)""",
+        )
+
+    def test_object_graph_cycles(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.alloc()
+        var2 = bb.store(var1, 0, var1)
+        var3 = bb.store(var0, 1, var1)
+        #   ┌────────┐
+        #   ▼        │
+        #  obj0      │
+        # ┌──────┐   │
+        # │ 0: ╷ │   │
+        # └────┼─┘   │
+        #      │     │
+        #      └─────┘
+        # obj0 points to itself, and then it is
+        # escaped
+        opt_bb = optimize_alloc_removal(bb)
+        # the previous line fails with an
+        # InfiniteRecursionError
+        # materialize calls itself, infinitely
+
+        # what we want is instead this output:
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = alloc()
+optvar2 = store(optvar1, 0, optvar1)
+optvar3 = store(optvar0, 1, optvar1)""",
         )
 
 
