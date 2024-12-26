@@ -378,9 +378,12 @@ def optimize_alloc_removal(bb):
             continue
         if op.name == "load":
             info = op.arg(0).info
-            field = get_num(op)
-            op.make_equal_to(info.load(field))
-            continue
+            if info:  # virtual
+                field = get_num(op)
+                op.make_equal_to(info.load(field))
+                continue
+            # otherwise not virtual, use the
+            # general path below
         if op.name == "store":
             info = op.arg(0).info
             if info:  # virtual
@@ -618,6 +621,23 @@ optvar0 = getarg(0)
 optvar1 = alloc()
 optvar2 = store(optvar1, 0, optvar1)
 optvar3 = store(optvar0, 1, optvar1)""",
+        )
+
+    def test_load_non_virtual(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.load(var0, 0)
+        bb.print(var1)
+        # the next line fails in the line
+        # op.make_equal_to(info.load(field))
+        # because info is None
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = load(optvar0, 0)
+optvar2 = print(optvar1)""",
         )
 
 
