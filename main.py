@@ -1080,9 +1080,12 @@ class OptimizeTests(unittest.TestCase):
         var3 = bb.add(var2, 2)
         var4 = bb.print(var3)
         opt_bb = optimize(bb)
-        self.assertEqual(bb_to_str(opt_bb), """\
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
 var0 = add(5, 2)
-var1 = print(var0)""")
+var1 = print(var0)""",
+        )
 
     def test_keep_unknown_store(self):
         bb = Block()
