@@ -390,12 +390,7 @@ def optimize_alloc_removal(bb):
                 field = get_num(op)
                 info.store(field, op.arg(2))
                 continue
-            else:  # not virtual
-                # first materialize the
-                # right hand side
-                materialize(opt_bb, op.arg(2))
-                # then emit the store via
-                # the general path below
+            # not virtual; emit the store via the general path below
         # materialize all the arguments of
         # operations that are put into the
         # output basic block
