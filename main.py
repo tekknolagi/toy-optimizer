@@ -1056,9 +1056,9 @@ var1 = store(var0, 0, 1)""",
 
 
 def optimize(bb: Block) -> Block:
-    opt_bb = constfold(bb)
-    opt_bb = optimize_alloc_removal(opt_bb)
+    opt_bb = optimize_alloc_removal(bb)
     opt_bb = optimize_load_store(opt_bb)
+    opt_bb = constfold(opt_bb)
     opt_bb = delete_dead_code(opt_bb)
     return opt_bb
 
@@ -1080,12 +1080,7 @@ class OptimizeTests(unittest.TestCase):
         var3 = bb.add(var2, 2)
         var4 = bb.print(var3)
         opt_bb = optimize(bb)
-        self.assertEqual(
-            bb_to_str(opt_bb),
-            """\
-var0 = add(5, 2)
-var1 = print(var0)""",
-        )
+        self.assertEqual(bb_to_str(opt_bb), "var0 = print(7)")
 
     def test_keep_unknown_store(self):
         bb = Block()
