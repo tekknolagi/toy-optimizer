@@ -396,6 +396,11 @@ def optimize_alloc_removal(bb):
                 materialize(opt_bb, op.arg(2))
                 # then emit the store via
                 # the general path below
+        # materialize all the arguments of
+        # operations that are put into the
+        # output basic block
+        for arg in op.args:
+            materialize(opt_bb, arg.find())
         opt_bb.append(op)
     return opt_bb
 
@@ -639,6 +644,23 @@ optvar0 = getarg(0)
 optvar1 = load(optvar0, 0)
 optvar2 = print(optvar1)""",
         )
+
+    def test_materialize_on_other_ops(self):
+        # materialize not just on store
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.alloc()
+        var2 = bb.print(var1)
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = alloc()
+optvar2 = print(optvar1)""",
+        )
+        # again, the resulting basic block is not in
+        # valid SSA form
 
 
 if __name__ == "__main__":
