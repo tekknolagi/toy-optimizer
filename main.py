@@ -989,6 +989,22 @@ var1 = load(var0, 0)
 var2 = add(var1, 2)""",
         )
 
+    # TODO(max): Track pending stores and materialize when the object escapes
+    # This might require some kind of alias analysis
+    @unittest.expectedFailure
+    def test_remove_dead_store(self):
+        bb = Block()
+        v0 = bb.getarg(0)
+        v1 = bb.store(v0, 0, 5)
+        v2 = bb.store(v0, 0, 7)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = store(var0, 0, 7)""",
+        )
+
 
 def has_side_effects(op: Operation) -> bool:
     return op.name in {"print", "store"}
