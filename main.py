@@ -1010,6 +1010,18 @@ class OptimizeTests(unittest.TestCase):
         opt_bb = optimize(bb)
         self.assertEqual(bb_to_str(opt_bb), "")
 
+    def test_keep_unknown_store(self):
+        bb = Block()
+        arg0 = bb.getarg(0)
+        var1 = bb.store(arg0, 0, 1)
+        opt_bb = delete_dead_code(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = store(var0, 0, 1)""",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
