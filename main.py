@@ -662,6 +662,29 @@ optvar2 = print(optvar1)""",
         # again, the resulting basic block is not in
         # valid SSA form
 
+    def test_sink_allocations(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.alloc()
+        var2 = bb.store(var1, 0, 123)
+        var3 = bb.store(var1, 1, 456)
+        var4 = bb.load(var1, 0)
+        var5 = bb.load(var1, 1)
+        var6 = bb.add(var4, var5)
+        var7 = bb.store(var1, 0, var6)
+        var8 = bb.store(var0, 1, var1)
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = add(123, 456)
+optvar2 = alloc()
+optvar3 = store(optvar2, 0, optvar1)
+optvar4 = store(optvar2, 1, 456)
+optvar5 = store(optvar0, 1, optvar2)""",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
