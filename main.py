@@ -360,6 +360,10 @@ def materialize(opt_bb, value: Operation) -> None:
     assert value.name == "alloc"
     # put the alloc operation back into the trace
     opt_bb.append(value)
+    # put the content back
+    for idx, val in info.contents.items():
+        # re-create store operation
+        opt_bb.store(value, idx, val)
     # but only once
     value.info = None
 
@@ -520,6 +524,36 @@ optvar2 = store(optvar0, 0, optvar1)""",
             """\
 optvar0 = getarg(0)
 optvar1 = store(optvar0, 0, 17)""",
+        )
+
+    def test_materialize_fields(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.getarg(1)
+        obj = bb.alloc()
+        contents0 = bb.store(obj, 0, 8)
+        contents1 = bb.store(obj, 1, var1)
+        sto = bb.store(var0, 0, obj)
+
+        # the virtual obj looks like this
+        #  obj
+        # ┌──────┬──────────┐
+        # │ 0: 8 │ 1: var1  │
+        # └──────┴──────────┘
+        # then it needs to be materialized
+        # this is the first example where a virtual
+        # object that we want to materialize has any
+        # content and is not just an empty object
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = getarg(1)
+optvar2 = alloc()
+optvar3 = store(optvar2, 0, 8)
+optvar4 = store(optvar2, 1, optvar1)
+optvar5 = store(optvar0, 0, optvar2)""",
         )
 
 
