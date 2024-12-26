@@ -972,9 +972,14 @@ var0 = getarg(0)
 var1 = print(var0)""",
         )
 
+    # TODO(max): Maybe on a combination of load/store opt and DCE
+    @unittest.expectedFailure
     def test_delete_known_store(self):
-        # TODO(max): Maybe on a combination of load/store opt and DCE
-        pass
+        bb = Block()
+        var0 = bb.alloc()
+        var1 = bb.store(var0, 0, 1)
+        opt_bb = delete_dead_code(bb)
+        self.assertEqual(bb_to_str(opt_bb), "")
 
     def test_keep_unknown_store(self):
         bb = Block()
