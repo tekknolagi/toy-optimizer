@@ -269,5 +269,63 @@ v5 = add(v3, v4)""",
         # confusion.
 
 
+def constfold(bb: Block) -> Block:
+    opt_bb = Block()
+
+    for op in bb:
+        # basic idea: go over the list and do
+        # constant folding of add where possible
+        if op.name == "add":
+            arg0 = op.arg(0)  # uses .find()
+            arg1 = op.arg(1)  # uses .find()
+            if isinstance(arg0, Constant) and isinstance(arg1, Constant):
+                # can constant-fold! that means we
+                # learned a new equality, namely
+                # that op is equal to a specific
+                # constant
+                value = arg0.value + arg1.value
+                op.make_equal_to(Constant(value))
+                # don't need to have the operation
+                # in the optimized basic block
+                continue
+        # otherwise the operation is not
+        # constant-foldable and we put into the
+        # output list
+        opt_bb.append(op)
+    return opt_bb
+
+
+class ConstFoldTests(unittest.TestCase):
+    def test_constfold_simple(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.add(5, 4)
+        var2 = bb.add(var1, var0)
+
+        opt_bb = constfold(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = add(9, optvar0)""",
+        )
+
+    def test_constfold_two_ops(self):
+        # now it works!
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.add(5, 4)
+        var2 = bb.add(var1, 10)
+        var3 = bb.add(var2, var0)
+        opt_bb = constfold(bb)
+
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = add(19, optvar0)""",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
