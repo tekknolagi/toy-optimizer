@@ -362,6 +362,8 @@ def materialize(opt_bb, value: Operation) -> None:
     opt_bb.append(value)
     # put the content back
     for idx, val in info.contents.items():
+        # materialize recursively
+        materialize(opt_bb, val)
         # re-create store operation
         opt_bb.store(value, idx, val)
     # but only once
@@ -554,6 +556,37 @@ optvar2 = alloc()
 optvar3 = store(optvar2, 0, 8)
 optvar4 = store(optvar2, 1, optvar1)
 optvar5 = store(optvar0, 0, optvar2)""",
+        )
+
+    def test_materialize_chained_objects(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        obj0 = bb.alloc()
+        obj1 = bb.alloc()
+        contents = bb.store(obj0, 0, obj1)
+        const = bb.store(obj1, 0, 1337)
+        sto = bb.store(var0, 0, obj0)
+        #  obj0
+        # ┌──────┐
+        # │ 0: ╷ │
+        # └────┼─┘
+        #      │
+        #      ▼
+        #     obj1
+        #   ┌─────────┐
+        #   │ 0: 1337 │
+        #   └─────────┘
+        # now obj0 escapes
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = alloc()
+optvar2 = alloc()
+optvar3 = store(optvar2, 0, 1337)
+optvar4 = store(optvar1, 0, optvar2)
+optvar5 = store(optvar0, 0, optvar1)""",
         )
 
 
