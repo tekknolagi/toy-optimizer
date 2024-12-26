@@ -682,6 +682,43 @@ optvar4 = store(optvar2, 1, 456)
 optvar5 = store(optvar0, 1, optvar2)""",
         )
 
+    def test_materialize_used_store_non_virtual(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.store(var0, 0, 1)
+        var2 = bb.add(var1, 2)
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = store(var0, 0, 1)
+var2 = add(var1, 2)""",
+        )
+
+    def test_materialize_used_load_non_virtual(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.load(var0, 0)
+        var2 = bb.add(var1, 2)
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = load(var0, 0)
+var2 = add(var1, 2)""",
+        )
+
+    def test_dont_materialize_used_load_virtual(self):
+        bb = Block()
+        var0 = bb.alloc()
+        bb.store(var0, 0, 1)
+        var1 = bb.load(var0, 0)
+        var2 = bb.add(var1, 2)
+        opt_bb = optimize_alloc_removal(bb)
+        self.assertEqual(bb_to_str(opt_bb), "var0 = add(1, 2)")
+
 
 def eq_value(left: Value, right: Value) -> bool:
     if isinstance(left, Constant) and isinstance(right, Constant):
@@ -924,6 +961,34 @@ var4 = print(var2)
 var5 = print(var3)""",
         )
 
+    def test_materialize_used_store_non_virtual(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.store(var0, 0, 1)
+        var2 = bb.add(var1, 2)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = store(var0, 0, 1)
+var2 = add(var1, 2)""",
+        )
+
+    def test_materialize_used_load_non_virtual(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        var1 = bb.load(var0, 0)
+        var2 = bb.add(var1, 2)
+        opt_bb = optimize_load_store(bb)
+        self.assertEqual(
+            bb_to_str(opt_bb),
+            """\
+var0 = getarg(0)
+var1 = load(var0, 0)
+var2 = add(var1, 2)""",
+        )
+
 
 def has_side_effects(op: Operation) -> bool:
     return op.name in {"print", "store"}
@@ -940,9 +1005,9 @@ def delete_dead_code(bb: Block) -> Block:
     while worklist:
         op = worklist.pop(0)
         for arg in op.args:
+            arg = arg.find()
             if isinstance(arg, Constant):
                 continue
-            arg = arg.find()
             if arg not in mark:
                 mark[arg] = True
                 worklist.append(arg)
@@ -1003,8 +1068,21 @@ class OptimizeTests(unittest.TestCase):
         bb = Block()
         var0 = bb.alloc()
         var1 = bb.store(var0, 0, 1)
+        var2 = bb.add(var1, 2)
         opt_bb = optimize(bb)
         self.assertEqual(bb_to_str(opt_bb), "")
+
+    def test_delete_known_load(self):
+        bb = Block()
+        var0 = bb.alloc()
+        var1 = bb.store(var0, 0, 5)
+        var2 = bb.load(var0, 0)
+        var3 = bb.add(var2, 2)
+        var4 = bb.print(var3)
+        opt_bb = optimize(bb)
+        self.assertEqual(bb_to_str(opt_bb), """\
+var0 = add(5, 2)
+var1 = print(var0)""")
 
     def test_keep_unknown_store(self):
         bb = Block()
