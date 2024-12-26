@@ -348,6 +348,16 @@ def get_num(op, index=1):
     return op.arg(index).value
 
 
+def materialize(opt_bb, value: Operation) -> None:
+    assert not isinstance(value, Constant)
+    assert isinstance(value, Operation)
+    info = value.info
+    assert isinstance(info, VirtualObject)
+    assert value.name == "alloc"
+    # put the alloc operation back into the trace
+    opt_bb.append(value)
+
+
 def optimize_alloc_removal(bb):
     opt_bb = Block()
     for op in bb:
@@ -361,9 +371,16 @@ def optimize_alloc_removal(bb):
             continue
         if op.name == "store":
             info = op.arg(0).info
-            field = get_num(op)
-            info.store(field, op.arg(2))
-            continue
+            if info:  # virtual
+                field = get_num(op)
+                info.store(field, op.arg(2))
+                continue
+            else:  # not virtual
+                # first materialize the
+                # right hand side
+                materialize(opt_bb, op.arg(2))
+                # then emit the store via
+                # the general path below
         opt_bb.append(op)
     return opt_bb
 
@@ -419,6 +436,28 @@ optvar1 = print(optvar0)""",
             """\
 optvar0 = getarg(0)
 optvar1 = print(optvar0)""",
+        )
+
+    def test_materialize(self):
+        bb = Block()
+        var0 = bb.getarg(0)
+        obj = bb.alloc()
+        sto = bb.store(var0, 0, obj)
+        opt_bb = optimize_alloc_removal(bb)
+        #  obj is virtual, without any fields
+        # ┌───────┐
+        # │ empty │
+        # └───────┘
+        # then we store a reference to obj into
+        # field 0 of var0. Since var0 is not virtual,
+        # obj escapes, so we have to put it back
+        # into the optimized basic block
+        self.assertEqual(
+            bb_to_str(opt_bb, "optvar"),
+            """\
+optvar0 = getarg(0)
+optvar1 = alloc()
+optvar2 = store(optvar0, 0, optvar1)""",
         )
 
 
